@@ -75,6 +75,7 @@ func New(configPath string, pager string, previewFeeds []string) (Config, error)
 		sep := string(os.PathSeparator)
 		parts := strings.Split(configPath, sep)
 		configDir = strings.Join(parts[0:len(parts)-1], sep)
+		fmt.Println("configDir:", configDir)
 	}
 
 	var f []Feed

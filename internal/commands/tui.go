@@ -52,6 +52,15 @@ type itemDelegate struct{}
 func (d itemDelegate) Height() int                               { return 1 }
 func (d itemDelegate) Spacing() int                              { return 0 }
 func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
+func (d itemDelegate) FixFeedName(name string, maxLen int) string {
+	if len(name) >= maxLen {
+		return name
+	}
+
+	numSpaces := maxLen - len(name)
+	padding := strings.Repeat(" ", numSpaces)
+	return padding + name
+}
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	i, ok := listItem.(TUIItem)
 	if !ok {
@@ -62,7 +71,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	if i.FeedName == "" {
 		str = fmt.Sprintf("%3d. %s", index+1, i.Title)
 	} else {
-		str = fmt.Sprintf("%3d. %s: %s", index+1, i.FeedName, i.Title)
+		str = fmt.Sprintf("%3d. %s: %s", index+1, d.FixFeedName(i.FeedName, 20), i.Title)
 	}
 
 	fn := itemStyle.Render
