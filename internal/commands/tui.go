@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -103,10 +104,10 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 
 type model struct {
 	list            list.Model
+	help            help.Model
 	commands        Commands
 	selectedArticle *int
 	viewport        viewport.Model
-	prevKeyWasG     bool
 	errors          []string
 }
 
@@ -156,12 +157,9 @@ func updateList(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch keypress := msg.String(); keypress {
+		switch {
 
-		case "ctrl+c":
-			return m, tea.Quit
-
-		case "r":
+		case key.Matches(msg, ListKeyMap.Refresh):
 			if m.list.SettingFilter() {
 				break
 			}
@@ -187,7 +185,7 @@ func updateList(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 
 			return m, m.list.NewStatusMessage("Refreshed.")
 
-		case "m":
+		case key.Matches(msg, ListKeyMap.Read):
 			if m.list.SettingFilter() {
 				break
 			}
@@ -203,7 +201,7 @@ func updateList(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 			}
 			m.UpdateList()
 
-		case "M":
+		case key.Matches(msg, ListKeyMap.ToggleReads):
 			if m.list.SettingFilter() {
 				break
 			}
@@ -211,7 +209,7 @@ func updateList(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 			m.commands.config.ToggleShowRead()
 			m.UpdateList()
 
-		case "f":
+		case key.Matches(msg, ListKeyMap.Favourite):
 			if m.list.SettingFilter() {
 				break
 			}
@@ -227,7 +225,7 @@ func updateList(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 			}
 			m.UpdateList()
 
-		case "F":
+		case key.Matches(msg, ListKeyMap.ToggleFavourites):
 			if m.list.SettingFilter() {
 				break
 			}
@@ -241,18 +239,25 @@ func updateList(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 			m.commands.config.ToggleShowFavourites()
 			m.UpdateList()
 
-		case "o":
+		case key.Matches(msg, ViewportKeyMap.OpenInBrowser):
 			if m.list.SettingFilter() {
 				break
 			}
-			current := m.list.SelectedItem().(TUIItem)
+
+			item := m.list.SelectedItem()
+			if item == nil {
+				return m, m.list.NewStatusMessage("No link selected.")
+			}
+
+			current := item.(TUIItem)
 			err := m.commands.OpenLink(current.URL)
 			if err != nil {
 				return m, tea.Quit
 			}
 
-		case "enter":
+		case key.Matches(msg, ListKeyMap.Open):
 			if m.list.SettingFilter() {
+				m.list.FilterInput.Blur()
 				break
 			}
 			i, ok := m.list.SelectedItem().(TUIItem)
@@ -287,28 +292,28 @@ func updateViewport(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 	)
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.help.Width = msg.Width
+
 	case tea.KeyMsg:
-		switch keypress := msg.String(); keypress {
-		case "g":
-			if m.prevKeyWasG {
-				m.viewport.GotoTop()
-				m.prevKeyWasG = false
-			} else {
-				m.prevKeyWasG = true
-			}
-		case "G":
+		switch {
+		case key.Matches(msg, ViewportKeyMap.GotoStart):
+			m.viewport.GotoTop()
+
+		case key.Matches(msg, ViewportKeyMap.GotoEnd):
 			m.viewport.GotoBottom()
-		case "esc", "q":
+
+		case key.Matches(msg, ViewportKeyMap.Escape):
 			m.selectedArticle = nil
 
-		case "o":
+		case key.Matches(msg, ViewportKeyMap.OpenInBrowser):
 			current := m.list.SelectedItem().(TUIItem)
 			err := m.commands.OpenLink(current.URL)
 			if err != nil {
 				return m, tea.Quit
 			}
 
-		case "h":
+		case key.Matches(msg, ViewportKeyMap.Prev):
 			current := m.list.Index()
 			if current-1 < 0 {
 				return m, nil
@@ -329,7 +334,7 @@ func updateViewport(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 			cmd = m.UpdateList()
 			cmds = append(cmds, cmd)
 
-		case "l":
+		case key.Matches(msg, ViewportKeyMap.Next):
 			current := m.list.Index()
 			items := m.list.Items()
 			if current+1 >= len(items) {
@@ -349,8 +354,16 @@ func updateViewport(msg tea.Msg, m model) (tea.Model, tea.Cmd) {
 			m.viewport.SetContent(content)
 			cmd = m.UpdateList()
 			cmds = append(cmds, cmd)
-		case "ctrl+c":
+		case key.Matches(msg, ViewportKeyMap.Quit):
 			return m, tea.Quit
+
+		case key.Matches(msg, ViewportKeyMap.ShowFullHelp):
+			m.help.ShowAll = !m.help.ShowAll
+			if m.help.ShowAll {
+				m.viewport.Height = m.viewport.Height + lipgloss.Height(m.help.ShortHelpView(ViewportKeyMap.ShortHelp())) - lipgloss.Height(m.help.FullHelpView(ViewportKeyMap.FullHelp()))
+			} else {
+				m.viewport.Height = m.viewport.Height + lipgloss.Height(m.help.FullHelpView(ViewportKeyMap.FullHelp())) - lipgloss.Height(m.help.ShortHelpView(ViewportKeyMap.ShortHelp()))
+			}
 		}
 	}
 
@@ -382,12 +395,12 @@ func listView(m model) string {
 	return "\n" + m.list.View()
 }
 
-func viewportView(m model) string {
-	return m.viewport.View() + "\n" + m.viewportHelp()
+func (m model) viewportHelp() string {
+	return helpStyle.Render(m.help.View(ViewportKeyMap))
 }
 
-func (m model) viewportHelp() string {
-	return helpStyle.Render("\nk/j up/down • h/l prev/next • gg/G top/bot • o open • q/esc back")
+func viewportView(m model) string {
+	return m.viewport.View() + "\n" + m.viewportHelp()
 }
 
 func ItemToTUIItem(i store.Item) TUIItem {
@@ -550,47 +563,13 @@ func Render(items []list.Item, cmds Commands, errors []string) error {
 	l.Styles.Title = titleStyle
 	l.Styles.PaginationStyle = paginationStyle
 	l.Styles.HelpStyle = helpStyle
-	// remove some extra keys from next/prev as used for other things
-	l.KeyMap.NextPage.SetKeys("right", "l", "pgdown")
-	l.KeyMap.PrevPage.SetKeys("left", "h", "pgup")
 	l.Filter = CustomFilter
 
-	l.AdditionalFullHelpKeys = func() []key.Binding {
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("m"),
-				key.WithHelp("m", "toggle read"),
-			),
-			key.NewBinding(
-				key.WithKeys("M"),
-				key.WithHelp("M", "show/hide read"),
-			),
-			key.NewBinding(
-				key.WithKeys("f"),
-				key.WithHelp("f", "toggle favourite"),
-			),
-			key.NewBinding(
-				key.WithKeys("F"),
-				key.WithHelp("F", "show/hide all favourites"),
-			),
-			key.NewBinding(
-				key.WithKeys("r"),
-				key.WithHelp("r", "refresh feed"),
-			),
-		}
-	}
-	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("o"),
-				key.WithHelp("o", "open link"),
-			),
-		}
-	}
+	ListKeyMap.SetOverrides(&l)
 
 	vp := viewport.New(78, height)
 
-	m := model{list: l, commands: cmds, viewport: vp, errors: errors}
+	m := model{list: l, commands: cmds, viewport: vp, errors: errors, help: help.New()}
 
 	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
 		return fmt.Errorf("tui.Render: %w", err)
